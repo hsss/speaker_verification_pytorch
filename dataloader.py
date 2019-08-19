@@ -3,9 +3,6 @@ import numpy as np
 
 import torch
 
-import augmentations
-import transforms
-
 import pickle
 
 from torch.utils.data import Dataset, DataLoader
@@ -13,7 +10,7 @@ from torch.utils.data import Dataset, DataLoader
 from mfcc_IO import *
 
 
-class VoxCeleb(Dataset):
+class VoxCeleb_with_mask(Dataset):
 	def __init__(self, lines, spk_dic, num_frames):
 		self.lines = lines
 		self.spk_dic = spk_dic
@@ -29,7 +26,7 @@ class VoxCeleb(Dataset):
 		pointer = int (tmp[1].split(':')[1])
 		src = open(tmp[1].split(':')[0], 'rb')
 		src.seek(pointer)
-		spec = read_kaldi_mfcc(src)
+		spec = np.array(read_kaldi_mfcc(src), np.float32)
 		src.close()
 		
 		spk = utt.split('/')[0]
@@ -51,12 +48,15 @@ class VoxCeleb(Dataset):
 		data = spec[st_idx:ed_idx,:]
 		data = data.reshape((data.shape[0], data.shape[1], 1))
 
-		return np.transpose(data, (2,0,1 )), ans
+		ans2 = list(range(len(self.spk_dic)))
+		del ans2[ans]
+
+		
+		return np.transpose(data, (2,0,1 )), [ ans, np.array(ans2,np.int32)]
 
 	def __len__(self):
-		#return 20000
 		return len(self.lines)
-		
+
 
 class VoxCeleb_test(Dataset):
 	def __init__(self, val_lines, val_key):
@@ -91,23 +91,19 @@ def get_loader(config):
 	num_workers = config['num_workers']
 	use_gpu = config['use_gpu']
 
-	voxceleb1_all_lines = open('scp/fbank_voxceleb1.scp', 'r').readlines()
-	voxceleb1_lines = []
-	voxceleb1_val_lines = []
-	voxceleb1_val_key = []
-
-	for line in voxceleb1_all_lines:
-		if '_babble_' in line or '_fan_' in line or '_laundry_' in line or '_rain_' in line or '_vacuuum_' in line:
-			continue
-		tmp = line.strip().split(' ')
-		utt = tmp[0]
-		spk = utt.split('/')[0]
+	voxceleb2_meta = open('scp/vox2_meta.csv').readlines()[1:]
 		
-		if spk[0] == 'E':
-			voxceleb1_val_lines.append(line)
-			voxceleb1_val_key.append(utt)
-		else:
-			voxceleb1_lines.append(line)
+	voxceleb2_spk_split = {}
+	for line in voxceleb2_meta:
+		#'id09263 ,n009263 ,m ,dev \n'
+		tmp = line.split(' ,')
+		
+		voxceleb2_spk_split[tmp[0]] = tmp[3]
+	
+	
+	voxceleb2_val_lines = []
+	voxceleb2_val_key = []
+	voxceleb2_tr_lines = []
 	
 
 	voxceleb2_lines = open('scp/fbank_voxceleb2.scp', 'r').readlines()
@@ -119,15 +115,20 @@ def get_loader(config):
 		
 		spk = utt.split('/')[0]
 		
-		if spk not in spk_dic:
-			spk_dic[spk] = len(spk_dic)
-	print('Number of spks', len(spk_dic))
+		if 'test' in voxceleb2_spk_split[spk] :
+			voxceleb2_val_lines.append(line)
+			voxceleb2_val_key.append(utt)
+		else:
+			voxceleb2_tr_lines.append(line)
+			if spk not in spk_dic:
+				spk_dic[spk] = len(spk_dic)
+	
+	print('Number of tr spks', len(spk_dic))
+	
 	config['n_classes'] = len(spk_dic)
 
-	
-	
-	train_dataset =  VoxCeleb(tr_lines, spk_dic, config['num_frames'])
-	test_dataset = VoxCeleb_test(voxceleb1_val_lines, voxceleb1_val_key)
+	train_dataset =  VoxCeleb_with_mask(voxceleb2_tr_lines, spk_dic, config['num_frames'])
+	test_dataset = VoxCeleb_test(voxceleb2_val_lines, voxceleb2_val_key)
 	
 	train_loader = torch.utils.data.DataLoader(
 		train_dataset,
@@ -147,4 +148,5 @@ def get_loader(config):
 		pin_memory=use_gpu,
 		drop_last=False,
 	)
+
 	return train_loader, test_loader

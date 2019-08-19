@@ -8,8 +8,7 @@ import importlib
 import collections
 import pathlib
 import time
-import json
-import logging
+
 import argparse
 import numpy as np
 import random
@@ -19,7 +18,6 @@ from EER import *
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision
 
 from dataloader import get_loader
 import utils
@@ -45,7 +43,12 @@ def train(epoch, model, optimizer, scheduler, train_criterion, train_loader, con
 	device = torch.device(config['device'])
 
 	model.train()
+	loss_cos = torch.nn.CosineEmbeddingLoss()
 	
+	negative_mask = torch.ones((config['n_classes'],config['n_classes']), dtype=torch.float32) - nn.init.eye_(torch.empty(config['n_classes'],config['n_classes']))					
+	negative_mask = negative_mask.to(device, dtype=torch.float)
+		
+
 	loss_meter = AverageMeter()
 	accuracy_meter = AverageMeter()
 	start = time.time()
@@ -59,18 +62,35 @@ def train(epoch, model, optimizer, scheduler, train_criterion, train_loader, con
 
 		if torch.cuda.device_count() == 1:
 			data = data.to(device, dtype=torch.float)
-	
-		
-		optimizer.zero_grad()
 			
-		targets = targets.to(device)
-		outputs, code = model(data)
-		
-		loss = train_criterion(outputs, targets)
-		total_loss = loss
-		
-		#torch.autograd.set_detect_anomaly(True)
+		optimizer.zero_grad()
 				
+		ans = targets[0]
+		ans2 = targets[1]
+		
+		ans = ans.to(device, dtype=torch.long)
+		ans2 = ans2.to(device, dtype=torch.long)
+		
+		H_loss, outputs = model(data, ans, ans2, False)
+
+		
+		if torch.cuda.device_count() == 1:
+			output_weight = model.fc_output.weight
+		else:
+			output_weight = model.module.fc_output.weight
+		
+		norm = torch.norm(output_weight, dim=1, keepdim=True) / (5. ** 0.5)
+		normed_weight = torch.div(output_weight, norm ) 
+
+		inner = torch.mm(normed_weight, normed_weight.t())			
+		BC_loss = torch.log(torch.exp( (inner * negative_mask) ** 2. ).mean())
+		H_loss = H_loss.mean()
+		CCE_loss = train_criterion(outputs, ans)
+		loss =  H_loss + CCE_loss + (BC_loss *config['BC_weight'])
+		
+
+		total_loss = loss 
+	
 			
 		total_loss.backward()
 		if 'gradient_clip' in config.keys():
@@ -81,8 +101,7 @@ def train(epoch, model, optimizer, scheduler, train_criterion, train_loader, con
 		loss_ = loss.item()
 		
 		num = data.size(0)
-		
-		accuracy = utils.accuracy(outputs, targets)[0].item()
+		accuracy = utils.accuracy(outputs, ans)[0].item()
 
 		loss_meter.update(loss_, num)
 		accuracy_meter.update(accuracy, num)
@@ -99,6 +118,7 @@ def train(epoch, model, optimizer, scheduler, train_criterion, train_loader, con
 							accuracy_meter.val,
 							accuracy_meter.avg,
 						))
+			
 
 	elapsed = time.time() - start
 	f_results.write('Epoch {} Step {}/{} '
@@ -134,7 +154,7 @@ def test(epoch, model, tst_lines, test_loader, config, f_results):
 	device = torch.device(config['device'])
 	target_dummy = torch.ones((config['batch_size'], )).to(device, dtype=torch.long)
 	model.eval()
-
+		
 	loss_meter = AverageMeter()
 	correct_meter = AverageMeter()
 	start = time.time()
@@ -144,9 +164,9 @@ def test(epoch, model, tst_lines, test_loader, config, f_results):
 				
 		for	data, targets in test_loader:
 			data = data.to(device, dtype=torch.float)
-			
-			outputs, code = model(data)
+			code = model(data, data, data,  True)
 			e_dic[targets[0]] = np.array(code.cpu(), np.float32)[0]
+
 		score_list = []
 	
 		for line in tst_lines:
@@ -186,13 +206,10 @@ def main():
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--config', type=str)
 	args = parser.parse_args()
-	
-	
+		
 	with open(args.config, 'r') as f_yaml:
 		config = yaml.load(f_yaml)
 	
-	
-
 	outdir = pathlib.Path(config['outdir'])
 	outdir.mkdir(exist_ok=True, parents=True)
 
@@ -211,7 +228,6 @@ def main():
 	random.seed(seed)
 	epoch_seeds = np.random.randint(
 		np.iinfo(np.int32).max // 2, size=config['epochs'])
-
 		
 	train_loader, test_loader = get_loader(config)
 	
@@ -221,20 +237,21 @@ def main():
 
 	n_params = sum([param.view(-1).size()[0] for param in model.parameters()])
 	print('n_params: {}'.format(n_params))
-	
+
 	device = torch.device(config['device'])
 	
 	if config['load_weights']:
 		state_dict = torch.load(config['model_path'])['state_dict']
 		model.load_state_dict(state_dict, strict=True)
-	
-	
+		
 	if device.type == 'cuda' and torch.cuda.device_count() > 1:
 		model = nn.DataParallel(model)
 	model.to(device)
 
 	train_criterion = nn.CrossEntropyLoss(reduction='mean')
 	test_criterion = nn.CrossEntropyLoss(reduction='mean')
+	
+	#params = model.parameters()
 	
 	params = [
 		{
@@ -258,11 +275,11 @@ def main():
 	config['steps_per_epoch'] = len(train_loader)
 	optimizer, scheduler = utils.create_optimizer(params, config)
 	
-	tst_lines_voxceleb1 = open('scp/voxceleb1_test.txt', 'r').readlines()
+	voxceleb2_val = open('scp/voxceleb2_val.txt', 'r').readlines()
 	
 	# run test before start training
 	if config['test_first']:
-		test(0, model, tst_lines_voxceleb1, test_loader, config, f_results)
+		test(0, model, voxceleb2_val, test_loader, config, f_results)
 	
 	state = {
 		'config': config,
@@ -281,7 +298,7 @@ def main():
 
 		epoch_log = train_log.copy()
 		
-		val_eer = test(epoch, model, tst_lines_voxceleb1, test_loader, config, f_results)
+		val_eer = test(epoch, model, voxceleb2_val, test_loader, config, f_results)
 							
 		epoch_logs.append(epoch_log)
 	
@@ -290,7 +307,7 @@ def main():
 		state = update_state(state, epoch, val_eer, model, optimizer)
 
 		# save model
-		#utils.save_checkpoint(state, outdir)
+		utils.save_checkpoint(state, outdir)
 		
 
 if __name__ == '__main__':

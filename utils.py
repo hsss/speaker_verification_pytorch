@@ -8,9 +8,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import augmentations
-import optim
-
 
 def str2bool(s):
     if s.lower() == 'true':
@@ -99,14 +96,10 @@ def _get_optimizer(model_parameters, optim_config):
             betas=optim_config['betas'],
             weight_decay=optim_config['weight_decay'],
             amsgrad=optim_config['amsgrad'])
-    elif optimizer_name == 'lars':
-        optimizer = optim.LARSOptimizer(
-            model_parameters,
-            lr=optim_config['base_lr'],
-            momentum=optim_config['momentum'],
-            weight_decay=optim_config['weight_decay'],
-            eps=optim_config['lars_eps'],
-            thresh=optim_config['lars_thresh'])
+    else:
+        print('Un-known optimizer', optimizer_name)
+        exit()
+
     return optimizer
 
 
@@ -222,17 +215,6 @@ def label_smoothing_criterion(epsilon, reduction):
 
 
 def get_criterion(data_config):
-    if data_config['use_mixup']:
-        train_criterion = augmentations.mixup.mixup_criterion
-    elif data_config['use_ricap']:
-        train_criterion = augmentations.ricap.ricap_criterion
-    elif data_config['use_label_smoothing']:
-        train_criterion = label_smoothing_criterion(
-            data_config['label_smoothing_epsilon'], reduction='mean')
-    elif data_config['use_dual_cutout']:
-        train_criterion = augmentations.cutout.DualCutoutCriterion(
-            data_config['dual_cutout_alpha'])
-    else:
-        train_criterion = nn.CrossEntropyLoss(reduction='mean')
+    train_criterion = nn.CrossEntropyLoss(reduction='mean')
     test_criterion = nn.CrossEntropyLoss(reduction='mean')
     return train_criterion, test_criterion

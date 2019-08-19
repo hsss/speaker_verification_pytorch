@@ -1,0 +1,22 @@
+outdir: results/CCE_H50k_01BS_10s_0001sWD/
+
+num_workers: 10
+use_gpu: True
+
+
+device: cuda
+
+load_weights: True
+model_path: 'results/CCE_H50k_01BS_10s_0001sWD/model_best_state.pth'
+
+
+input_shape: [ 1, 1, 300, 64 ]
+base_channels: 64
+n_stages: 4
+code_dim: 1024
+code_norm: True
+norm_s: 10.
+
+n_classes: 5994
+
+arch: spec_resnet_preact_HBC

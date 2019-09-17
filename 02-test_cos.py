@@ -51,9 +51,6 @@ def main():
 	voxceleb1_val_key = []
 
 	for line in voxceleb1_all_lines:
-		if '_babble_' in line or '_fan_' in line or '_laundry_' in line or '_rain_' in line or '_vacuuum_' in line:
-			continue
-
 		tmp = line.strip().split(' ')
 		utt = tmp[0]
 		spk = utt.split('/')[0]

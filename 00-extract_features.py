@@ -47,7 +47,8 @@ def split_scp(feat_scp_path, tmpfile_dir):
 if __name__ == '__main__':
 	
 	
-	wav_tmp = split_scp('scp/wav_voices_eval.scp', 'tmp')
+	wav_tmp = split_scp('scp/wav_voxceleb1.scp', 'tmp')
+	#wav_tmp = split_scp('scp/wav_voxceleb2.scp', 'tmp')
 	process_list = []
 	i = 0
 	
@@ -66,7 +67,8 @@ if __name__ == '__main__':
 	for pid in range(_num_process):
 		process_list[pid].join()
 	
-	f = open('scp/fbank_voices_eval.scp', 'w')
+	f = open('scp/fbank_voxceleb1.scp', 'w')
+	#f = open('scp/fbank_voxceleb2.scp', 'w')
 	
 	for i in range(_num_process):
 		

@@ -3,7 +3,9 @@
 ## Getting started
 
 ```
-python 01-train.py --config configs/HBS.yaml
+python 00-extract_features.py
+python 01-train.py --config configs/HBC.yaml
+python 02-test.py --config configs/HBC_cos.yaml
 ```
 
 ## References
